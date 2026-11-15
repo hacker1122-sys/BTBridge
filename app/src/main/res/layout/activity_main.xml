@@ -90,7 +90,7 @@
                 android:layout_marginStart="6dp"
                 android:layout_weight="1"
                 android:backgroundTint="#F57C00"
-                vandroid:text="Client"
+                android:text="Client"
                 android:textColor="#FFFFFF" />
         </LinearLayout>
 

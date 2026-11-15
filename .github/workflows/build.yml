@@ -16,33 +16,23 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Install Android SDK via Command Line Tools
+    - name: Setup Android SDK Environment
       run: |
-        echo "Setting up Android SDK..."
-        mkdir -p $HOME/android-sdk/cmdline-tools
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdtools.zip
-        unzip -q cmdtools.zip -d $HOME/android-sdk/cmdline-tools
-        mv $HOME/android-sdk/cmdline-tools/cmdline-tools $HOME/android-sdk/cmdline-tools/latest
-        
-        # Environment variables set karein
-        echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-        echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
+        # GitHub runner ke default ANDROID_HOME ko hi use karein taake conflict na ho
+        echo "Using Android SDK at: $ANDROID_HOME"
+        echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
+        echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
 
     - name: Accept Licenses & Install Platforms
       run: |
-        export ANDROID_HOME=$HOME/android-sdk
         yes | sdkmanager --licenses || true
         sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
-    - name: Download and Setup Stable Gradle 8.2
+    - name: Setup Gradle 8.2 & Build APK
       run: |
         wget -q https://services.gradle.org/distributions/gradle-8.2-bin.zip
         unzip -q gradle-8.2-bin.zip
-        echo "$(pwd)/gradle-8.2/bin" >> $GITHUB_PATH
-
-    - name: Generate Gradle Wrapper & Build APK
-      run: |
+        export PATH="$(pwd)/gradle-8.2/bin:$PATH"
         gradle wrapper --gradle-version 8.2
         chmod +x gradlew
         ./gradlew assembleDebug

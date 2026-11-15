@@ -35,14 +35,17 @@ jobs:
         yes | sdkmanager --licenses || true
         sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
-    - name: Generate Gradle Wrapper
+    - name: Download and Setup Stable Gradle 8.2
       run: |
-        # Agar gradlew file nahi hai toh gradle command se generate kar lo
+        wget -q https://services.gradle.org/distributions/gradle-8.2-bin.zip
+        unzip -q gradle-8.2-bin.zip
+        echo "$(pwd)/gradle-8.2/bin" >> $GITHUB_PATH
+
+    - name: Generate Gradle Wrapper & Build APK
+      run: |
         gradle wrapper --gradle-version 8.2
         chmod +x gradlew
-
-    - name: Build Debug APK
-      run: ./gradlew assembleDebug
+        ./gradlew assembleDebug
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4

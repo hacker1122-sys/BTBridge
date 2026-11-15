@@ -35,8 +35,11 @@ jobs:
         yes | sdkmanager --licenses || true
         sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
-    - name: Grant Executable Permission for Gradlew
-      run: chmod +x gradlew
+    - name: Generate Gradle Wrapper
+      run: |
+        # Agar gradlew file nahi hai toh gradle command se generate kar lo
+        gradle wrapper --gradle-version 8.2
+        chmod +x gradlew
 
     - name: Build Debug APK
       run: ./gradlew assembleDebug

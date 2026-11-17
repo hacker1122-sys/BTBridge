@@ -6,10 +6,13 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothServerSocket
 import android.bluetooth.BluetoothSocket
 import android.content.Context
+import android.net.ConnectivityManager
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.text.format.Formatter
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.Inet4Address
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.Executors
@@ -27,33 +30,41 @@ class BridgeEngine(
     private var wifiServerSocket: ServerSocket? = null
     private var activeSocket: java.io.Closeable? = null
 
-    fun stopAll() {
+    private fun resetSockets() {
         isRunning = false
         try { btServerSocket?.close() } catch (_: Exception) {}
         try { wifiServerSocket?.close() } catch (_: Exception) {}
         try { activeSocket?.close() } catch (_: Exception) {}
+        btServerSocket = null
+        wifiServerSocket = null
+        activeSocket = null
         activeOutStream = null
+    }
+
+    fun stopAll() {
+        resetSockets()
         onStatus("Disconnected", false)
         onLog("Service stopped.")
     }
 
     fun startM1Mode(token: String) {
-        stopAll()
+        resetSockets()
         isRunning = true
-        onStatus("M1 Mode Active (Waiting for Repeater)", true)
+        onStatus("M1 Host Active (Waiting on Wi-Fi)", true)
         executor.execute {
             try {
                 wifiServerSocket = ServerSocket(BridgeProtocol.WIFI_PORT)
-                onLog("M1 Server listening on port ${BridgeProtocol.WIFI_PORT}")
+                onLog("M1 Wi-Fi Server listening on port ${BridgeProtocol.WIFI_PORT}")
                 while (isRunning) {
                     val client = wifiServerSocket?.accept() ?: break
-                    onLog("Repeater connected: ${client.inetAddress.hostAddress}")
+                    onLog("Repeater link incoming: ${client.inetAddress.hostAddress}")
                     if (!BridgeProtocol.verifyHandshake(client.getInputStream(), token)) {
                         onLog("Security Reject: Invalid Token!")
                         client.close()
                         continue
                     }
-                    onLog("Handshake Verified! Link ready.")
+                    onLog("Handshake Verified! M1 <-> Repeater <-> Client Ready.")
+                    onStatus("M1 Connected & Ready", true)
                     activeSocket = client
                     activeOutStream = client.getOutputStream()
                     listenForFiles(client.getInputStream())
@@ -66,9 +77,10 @@ class BridgeEngine(
 
     @SuppressLint("MissingPermission")
     fun startRepeaterMode(btAdapter: BluetoothAdapter?, token: String) {
-        stopAll()
+        resetSockets()
         if (btAdapter == null || !btAdapter.isEnabled) {
             onLog("Error: Enable Bluetooth first!")
+            onStatus("Bluetooth Off", false)
             return
         }
         isRunning = true
@@ -77,30 +89,30 @@ class BridgeEngine(
         executor.execute {
             try {
                 val gatewayIp = getWifiGatewayIp()
-                if (gatewayIp == "0.0.0.0") {
-                    onLog("Error: Not connected to M1 Hotspot!")
+                if (gatewayIp.isEmpty() || gatewayIp == "0.0.0.0") {
+                    onLog("Error: Connect to M1 Wi-Fi Hotspot first!")
                     stopAll()
                     return@execute
                 }
-                onLog("M1 Hotspot Gateway IP: $gatewayIp")
+                onLog("Connected to M1 Hotspot Gateway: $gatewayIp")
 
                 btServerSocket = btAdapter.listenUsingRfcommWithServiceRecord("BTBridge", BridgeProtocol.APP_UUID)
-                onLog("Bluetooth server listening as 'M1'")
+                onLog("Bluetooth server open for Client...")
 
                 while (isRunning) {
                     val btSocket = btServerSocket?.accept() ?: break
-                    onLog("Client connected via Bluetooth: ${btSocket.remoteDevice.name}")
+                    onLog("Client connected via BT: ${btSocket.remoteDevice.name}")
 
                     executor.execute {
                         try {
                             val wifiSocket = Socket(gatewayIp, BridgeProtocol.WIFI_PORT)
-                            onLog("Transparent Pipe Established: Client <--> Repeater <--> M1")
-                            
+                            onLog("Transparent Pipe Active: Client <--> Repeater <--> M1")
+
                             val t1 = Thread { pipeStreams(btSocket.inputStream, wifiSocket.outputStream) }
                             val t2 = Thread { pipeStreams(wifiSocket.inputStream, btSocket.outputStream) }
                             t1.start(); t2.start()
                             t1.join(); t2.join()
-                            
+
                             wifiSocket.close()
                             btSocket.close()
                             onLog("Client disconnected.")
@@ -118,7 +130,7 @@ class BridgeEngine(
 
     @SuppressLint("MissingPermission")
     fun startClientMode(device: BluetoothDevice, token: String) {
-        stopAll()
+        resetSockets()
         isRunning = true
         onStatus("Connecting to ${device.name}...", false)
 
@@ -127,10 +139,10 @@ class BridgeEngine(
                 val btSocket: BluetoothSocket = device.createRfcommSocketToServiceRecord(BridgeProtocol.APP_UUID)
                 btSocket.connect()
                 BridgeProtocol.sendHandshake(btSocket.outputStream, token)
-                
+
                 activeSocket = btSocket
                 activeOutStream = btSocket.outputStream
-                onStatus("Connected to ${device.name}", true)
+                onStatus("Connected via Repeater to M1", true)
                 onLog("Link established successfully!")
                 listenForFiles(btSocket.inputStream)
             } catch (e: Exception) {
@@ -184,6 +196,17 @@ class BridgeEngine(
 
     @Suppress("DEPRECATION")
     private fun getWifiGatewayIp(): String {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val cm = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = cm.activeNetwork
+            val linkProps = cm.getLinkProperties(network)
+            linkProps?.routes?.forEach { route ->
+                if (route.isDefaultRoute && route.gateway is Inet4Address) {
+                    val host = route.gateway?.hostAddress
+                    if (!host.isNullOrEmpty() && host != "0.0.0.0") return host
+                }
+            }
+        }
         val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         val dhcp = wifiManager.dhcpInfo
         return Formatter.formatIpAddress(dhcp.gateway)
